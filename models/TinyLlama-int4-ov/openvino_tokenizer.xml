@@ -1,0 +1,231 @@
+<?xml version="1.0"?>
+<net name="tokenizer" version="11">
+	<layers>
+		<layer id="0" name="string_input" type="Parameter" version="opset1">
+			<data shape="?" element_type="string" />
+			<output>
+				<port id="0" precision="STRING" names="string_input">
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="1" name="Constant_8" type="Const" version="opset1">
+			<data element_type="i32" shape="" offset="0" size="4" />
+			<output>
+				<port id="0" precision="I32" />
+			</output>
+		</layer>
+		<layer id="2" name="Constant_1" type="Const" version="opset1">
+			<data element_type="u8" shape="499723" offset="4" size="499723" />
+			<output>
+				<port id="0" precision="U8">
+					<dim>499723</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="3" name="SentencepieceTokenizer_4" type="SentencepieceTokenizer" version="extension">
+			<data nbest_size="0" alpha="0" add_bos="true" add_eos="false" reverse="false" />
+			<input>
+				<port id="0" precision="U8">
+					<dim>499723</dim>
+				</port>
+				<port id="1" precision="STRING">
+					<dim>-1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="2" precision="I64">
+					<dim>-1</dim>
+					<dim>2</dim>
+				</port>
+				<port id="3" precision="I32">
+					<dim>-1</dim>
+				</port>
+				<port id="4" precision="I64">
+					<dim>2</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="4" name="Broadcast_9" type="Broadcast" version="opset3">
+			<data mode="numpy" />
+			<input>
+				<port id="0" precision="I32" />
+				<port id="1" precision="I64">
+					<dim>2</dim>
+				</port>
+			</input>
+			<output>
+				<port id="2" precision="I32">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="5" name="Constant_10" type="Const" version="opset1">
+			<data element_type="i32" shape="" offset="499727" size="4" />
+			<output>
+				<port id="0" precision="I32" />
+			</output>
+		</layer>
+		<layer id="6" name="ShapeOf_11" type="ShapeOf" version="opset3">
+			<data output_type="i64" />
+			<input>
+				<port id="0" precision="I32">
+					<dim>-1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="1" precision="I64">
+					<dim>1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="7" name="Broadcast_12" type="Broadcast" version="opset3">
+			<data mode="numpy" />
+			<input>
+				<port id="0" precision="I32" />
+				<port id="1" precision="I64">
+					<dim>1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="2" precision="I32">
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="8" name="ScatterNDUpdate_16" type="ScatterNDUpdate" version="opset4">
+			<input>
+				<port id="0" precision="I32">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+				<port id="1" precision="I64">
+					<dim>-1</dim>
+					<dim>2</dim>
+				</port>
+				<port id="2" precision="I32">
+					<dim>-1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="3" precision="I32">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="9" name="ScatterNDUpdate_16" type="Convert" version="opset1">
+			<data destination_type="i64" />
+			<input>
+				<port id="0" precision="I32">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="1" precision="I64" names="attention_mask">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="11" name="Constant_5" type="Const" version="opset1">
+			<data element_type="i32" shape="" offset="499731" size="4" />
+			<output>
+				<port id="0" precision="I32" />
+			</output>
+		</layer>
+		<layer id="12" name="Broadcast_6" type="Broadcast" version="opset3">
+			<data mode="numpy" />
+			<input>
+				<port id="0" precision="I32" />
+				<port id="1" precision="I64">
+					<dim>2</dim>
+				</port>
+			</input>
+			<output>
+				<port id="2" precision="I32">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="13" name="ScatterNDUpdate_7" type="ScatterNDUpdate" version="opset4">
+			<input>
+				<port id="0" precision="I32">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+				<port id="1" precision="I64">
+					<dim>-1</dim>
+					<dim>2</dim>
+				</port>
+				<port id="2" precision="I32">
+					<dim>-1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="3" precision="I32">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="14" name="ScatterNDUpdate_7" type="Convert" version="opset1">
+			<data destination_type="i64" />
+			<input>
+				<port id="0" precision="I32">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="1" precision="I64" names="input_ids">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="15" name="Result_17" type="Result" version="opset1">
+			<input>
+				<port id="0" precision="I64">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</input>
+		</layer>
+		<layer id="10" name="Result_18" type="Result" version="opset1">
+			<input>
+				<port id="0" precision="I64">
+					<dim>-1</dim>
+					<dim>-1</dim>
+				</port>
+			</input>
+		</layer>
+	</layers>
+	<edges>
+		<edge from-layer="0" from-port="0" to-layer="3" to-port="1" />
+		<edge from-layer="1" from-port="0" to-layer="4" to-port="0" />
+		<edge from-layer="2" from-port="0" to-layer="3" to-port="0" />
+		<edge from-layer="3" from-port="4" to-layer="4" to-port="1" />
+		<edge from-layer="3" from-port="3" to-layer="6" to-port="0" />
+		<edge from-layer="3" from-port="2" to-layer="8" to-port="1" />
+		<edge from-layer="3" from-port="3" to-layer="13" to-port="2" />
+		<edge from-layer="3" from-port="2" to-layer="13" to-port="1" />
+		<edge from-layer="3" from-port="4" to-layer="12" to-port="1" />
+		<edge from-layer="4" from-port="2" to-layer="8" to-port="0" />
+		<edge from-layer="5" from-port="0" to-layer="7" to-port="0" />
+		<edge from-layer="6" from-port="1" to-layer="7" to-port="1" />
+		<edge from-layer="7" from-port="2" to-layer="8" to-port="2" />
+		<edge from-layer="8" from-port="3" to-layer="9" to-port="0" />
+		<edge from-layer="9" from-port="1" to-layer="10" to-port="0" />
+		<edge from-layer="11" from-port="0" to-layer="12" to-port="0" />
+		<edge from-layer="12" from-port="2" to-layer="13" to-port="0" />
+		<edge from-layer="13" from-port="3" to-layer="14" to-port="0" />
+		<edge from-layer="14" from-port="1" to-layer="15" to-port="0" />
+	</edges>
+	<rt_info>
+		<eos_token_id value="2" />
+	</rt_info>
+</net>
