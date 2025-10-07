@@ -1,4 +1,4 @@
-# ocr_llm_proofread.py  — GUIで画像選択 / EasyOCR固定 / NPU LLMで誤字検出
+# ocr_llm_proofread.py  — GUIで画像選択 / EasyOCR固定 / NPU LLMで誤字検出 + NMS重複除去
 from string import Template
 import os, sys, json, time, argparse, re, glob, textwrap, traceback, shutil
 from typing import List, Dict, Any
@@ -22,6 +22,36 @@ import cv2
 import openvino as ov
 import openvino_genai as ov_genai
 
+# --- IoUベースの重複除去（NMS） ---
+def _rect_from_quad(quad):
+    xs = [p[0] for p in quad]; ys = [p[1] for p in quad]
+    return [min(xs), min(ys), max(xs), max(ys)]  # x1,y1,x2,y2
+
+def _iou(a, b):
+    ax1, ay1, ax2, ay2 = a; bx1, by1, bx2, by2 = b
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = iw * ih
+    area_a = (ax2 - ax1) * (ay2 - ay1)
+    area_b = (bx2 - bx1) * (by2 - by1)
+    union = max(1e-6, area_a + area_b - inter)
+    return inter / union
+
+def _nms_keep(items, iou_thresh=0.35):
+    # items: [{"text":..,"conf":..,"box":quad, "_rect":[x1,y1,x2,y2]}, ...]
+    items = sorted(items, key=lambda x: x["conf"], reverse=True)
+    keep = []
+    for it in items:
+        discard = False
+        for kt in keep:
+            if _iou(it["_rect"], kt["_rect"]) >= iou_thresh:
+                discard = True
+                break
+        if not discard:
+            keep.append(it)
+    return keep
+
 # ----- NumPy混入をすべてPython標準型へ変換（JSON化のため） -----
 def to_py(obj):
     if isinstance(obj, np.generic):
@@ -37,7 +67,7 @@ def to_py(obj):
 # ====== 2) EasyOCR  ======
 def _load_ocr():
     import easyocr
-    # 英数混在が多い場合は ['ja','en'] にしてもOK
+    # 英数混在が多い場合は ['ja','en'] に
     langs = ['ja']
     return ("easyocr", easyocr.Reader(langs))
 
@@ -45,13 +75,11 @@ def _to_box_py(box) -> list[list[int]]:
     arr = np.array(box, dtype=float).reshape(-1, 2)
     return [[int(round(x)), int(round(y))] for x, y in arr]
 
-def run_ocr(backend: str, ocr, image_path: str) -> dict:
+def run_ocr(backend: str, ocr, image_path: str, enhance: bool = False) -> dict:
     """
-    日本語パスでも確実に読み取れるように:
-    - ファイルをバイナリで読み、imdecodeでndarray化
-    - EasyOCRへndarrayを直接渡す
-    - 見落とし対策: コントラスト強調・二値化の救済パス、画像が小さければ拡大パス
-    - 近接ボックスの重複統合 + 読み順ソート
+    日本語パス対応: imdecodeで読み、ndarrayをEasyOCRへ。
+    複数パス（原画 / enhance指定時に強調・二値化 / 小さい画像は拡大）で召喚。
+    最後にIoU-NMSで重複を除去し、読み順ソート。
     """
     # --- Unicode安全読み込み ---
     img = None
@@ -62,14 +90,14 @@ def run_ocr(backend: str, ocr, image_path: str) -> dict:
     except Exception:
         img = None
 
-    def _easyocr(img_bgr):
-        # 1) 原画そのまま
-        res1 = ocr.readtext(
+    def _easyocr_once(img_bgr):
+        return ocr.readtext(
             img_bgr, detail=1, paragraph=False,
             low_text=0.2, text_threshold=0.5, link_threshold=0.3,
             mag_ratio=2.0, slope_ths=0.1, ycenter_ths=0.6, height_ths=0.6, width_ths=0.7
         )
-        # 2) コントラスト強調＋二値化の救済パス
+
+    def _easyocr_enhanced(img_bgr):
         g  = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         g  = cv2.fastNlMeansDenoising(g, h=7)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
@@ -77,21 +105,24 @@ def run_ocr(backend: str, ocr, image_path: str) -> dict:
         th = cv2.adaptiveThreshold(g2, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                    cv2.THRESH_BINARY, 31, 10)
         th = cv2.cvtColor(th, cv2.COLOR_GRAY2BGR)
-        res2 = ocr.readtext(
+        return ocr.readtext(
             th, detail=1, paragraph=False,
             low_text=0.2, text_threshold=0.4, link_threshold=0.2,
             mag_ratio=2.0, slope_ths=0.2, ycenter_ths=0.7, height_ths=0.7, width_ths=0.8
         )
-        return res1 + res2
 
     results = []
     if img is not None:
-        results += _easyocr(img)
+        results += _easyocr_once(img)
+        if enhance:
+            results += _easyocr_enhanced(img)
         # 小さい画像は拡大して再推論
         h, w = img.shape[:2]
         if (h < 600 or w < 600):
             img_up = cv2.resize(img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-            results += _easyocr(img_up)
+            results += _easyocr_once(img_up)
+            if enhance:
+                results += _easyocr_enhanced(img_up)
     else:
         # どうしても読めない場合はASCII一時コピー→パス入力で実行
         tmp_dir = os.environ.get("TMP", r"C:\Hiroto\IR\.tmp")
@@ -100,29 +131,24 @@ def run_ocr(backend: str, ocr, image_path: str) -> dict:
         shutil.copy2(image_path, tmp_path)
         results += ocr.readtext(tmp_path, detail=1, paragraph=False, mag_ratio=2.0)
 
-    # --- 近接ボックスの重複統合（簡易） ---
-    def _norm_xy(box):
-        xs = [p[0] for p in box]; ys = [p[1] for p in box]
-        return (int(round(sum(xs)/4)), int(round(sum(ys)/4)))
-
+    # ---- results を Python型に落として merged を作る ----
     merged = []
-    seen   = []
     for (box, txt, conf) in results:
         if not str(txt).strip():
             continue
         box_py = _to_box_py(box)
-        cx, cy = _norm_xy(box_py)
-        dup = False
-        for (px, py) in seen:
-            if abs(cx - px) < 20 and abs(cy - py) < 20:
-                dup = True
-                break
-        if not dup:
-            seen.append((cx, cy))
-            merged.append({"text": str(txt), "conf": float(conf), "box": box_py})
+        merged.append({"text": str(txt), "conf": float(conf), "box": box_py})
 
+    # --- NMSで重複除去（IoU基準） ---
+    for m in merged:
+        m["_rect"] = _rect_from_quad(m["box"])
+    merged = _nms_keep(merged, iou_thresh=0.35)
     # 読み順ソート（上→下、左→右）
     merged.sort(key=lambda r: (min(p[1] for p in r["box"]), min(p[0] for p in r["box"])))
+    # 仕上げ：作業用キー削除
+    for m in merged:
+        m.pop("_rect", None)
+
     joined = "\n".join([m["text"] for m in merged])
     return {"lines": merged, "text": joined}
 
@@ -168,7 +194,7 @@ def chunk_text(s: str, max_chars: int = 800) -> List[str]:
     return chunks
 
 def llm_detect(pipe, ocr_block: str, max_new_tokens=120) -> Dict[str, Any]:
-    # Template で埋め込み（JSONの {} を誤解されない）
+    # Templateで埋め込み（JSONの{}を誤解されない）
     prompt = PROMPT_TMPL.substitute(OCR_BLOCK=ocr_block)
     out = pipe.generate(
         prompt,
@@ -186,6 +212,7 @@ def llm_detect(pipe, ocr_block: str, max_new_tokens=120) -> Dict[str, Any]:
     except Exception:
         pass
     return {"corrections": [], "corrected_text": ocr_block, "raw": out}
+
 # ====== 4) GUI: ファイル選択 & 最終保存 ======
 def pick_images_with_dialog(last_dir_hint: str | None = None) -> list[str]:
     try:
@@ -236,6 +263,7 @@ def main():
     ap.add_argument("--out", default=r"C:\Hiroto\IR\result.json")
     ap.add_argument("--max_prompt", type=int, default=512)
     ap.add_argument("--max_new_tokens", type=int, default=120)
+    ap.add_argument("--enhance", action="store_true", help="コントラスト強調/二値化の救済パスを有効化")
     args = ap.parse_args()
 
     core = ov.Core()
@@ -281,7 +309,7 @@ def main():
         print(f"\n=== [{i}/{len(targets)}] {img} ===")
         t0 = time.time()
         try:
-            o = run_ocr(backend, ocr, img)
+            o = run_ocr(backend, ocr, img, enhance=args.enhance)
             print(f"[OCR] lines={len(o['lines'])} chars={len(o['text'])} ({time.time()-t0:.2f}s)")
             blocks = chunk_text(o["text"], max_chars=800)
             all_corr, corr_blocks = [], []
