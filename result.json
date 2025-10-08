@@ -1,0 +1,13 @@
+{
+  "reports": [
+    {
+      "image": "C:\\Users\\前野洋斗\\OneDrive\\画像\\Screenshots\\example.png",
+      "ocr_backend": "easyocr",
+      "ocr_lines": [
+        {
+          "text": "動作確認する方法",
+          "conf": 0.9946686843815498,
+          "box": [
+            [
+              0,
+              
